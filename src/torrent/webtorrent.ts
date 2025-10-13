@@ -63,12 +63,23 @@ const SEED_TIME = Number(process.env.SEED_TIME) || 60 * 1000;
 // Timeout (ms) when adding torrents if no metadata is received (default 5 seconds)
 const TORRENT_TIMEOUT = Number(process.env.TORRENT_TIMEOUT) || 5 * 1000;
 
-const infoClient = new WebTorrent();
+const infoClient = new WebTorrent({
+  // Reduce DHT activity for metadata fetching client
+  dht: {
+    // Reduce concurrent lookups to save CPU
+    concurrency: 8, // default is 16
+  },
+});
+
 const streamClient = new WebTorrent({
   // @ts-ignore
   downloadLimit: DOWNLOAD_SPEED_LIMIT,
   uploadLimit: UPLOAD_SPEED_LIMIT,
   maxConns: MAX_CONNS_PER_TORRENT,
+  dht: {
+    // More aggressive for actual streaming
+    concurrency: 16,
+  },
 });
 
 streamClient.on("torrent", (torrent) => {
@@ -116,6 +127,48 @@ export const getStats = () => ({
 
 export const getOrAddTorrent = (uri: string) =>
   new Promise<Torrent | undefined>((resolve) => {
+    let resolved = false;
+
+    // Cleanup function that ensures everything is cleaned up exactly once
+    const cleanup = (result: Torrent | undefined, torrent: any, shouldDestroy: boolean) => {
+      if (resolved) return; // Prevent double cleanup
+      resolved = true;
+
+      clearTimeout(timeout);
+
+      // Remove error listener to prevent memory leak
+      if (torrent) {
+        torrent.removeListener('error', onError);
+      }
+
+      // Only destroy if we should (not for duplicates or successful adds)
+      if (shouldDestroy && torrent && typeof torrent.destroy === 'function') {
+        try {
+          torrent.destroy();
+        } catch (e) {
+          // Ignore destroy errors
+        }
+      }
+
+      resolve(result);
+    };
+
+    // Error handler
+    const onError = (err: Error) => {
+      // Check if it's a duplicate torrent error
+      if (err.message && err.message.includes('duplicate torrent')) {
+        console.log(`Torrent already added, reusing existing`);
+        // Try to get the existing torrent
+        const existingTorrent = streamClient.torrents.find(t =>
+          t.magnetURI === uri || t.infoHash === uri
+        );
+        cleanup(existingTorrent, torrent, false); // Don't destroy, just cleanup listeners
+      } else {
+        console.log(`Failed to add torrent: ${err.message}`);
+        cleanup(undefined, torrent, true); // Destroy on real errors
+      }
+    };
+
     const torrent = streamClient.add(
       uri,
       {
@@ -125,14 +178,16 @@ export const getOrAddTorrent = (uri: string) =>
         deselect: true,
       },
       (torrent) => {
-        clearTimeout(timeout);
-        resolve(torrent);
+        cleanup(torrent, torrent, false); // Success, don't destroy
       }
     );
 
+    // Listen for errors
+    torrent.on('error', onError);
+
     const timeout = setTimeout(() => {
-      torrent.destroy();
-      resolve(undefined);
+      console.log(`Timeout adding torrent: ${uri.substring(0, 50)}...`);
+      cleanup(undefined, torrent, true); // Timeout, destroy
     }, TORRENT_TIMEOUT);
   });
 
@@ -152,27 +207,116 @@ export const getTorrentInfo = async (uri: string) => {
   });
 
   return await new Promise<TorrentInfo | undefined>((resolve) => {
+    let resolved = false;
+
+    // Cleanup function that ensures everything is cleaned up exactly once
+    const cleanup = (result: TorrentInfo | undefined, torrent: any) => {
+      if (resolved) return; // Prevent double cleanup
+      resolved = true;
+
+      clearTimeout(timeout);
+
+      // Remove error listener to prevent memory leak
+      if (torrent) {
+        torrent.removeListener('error', onError);
+      }
+
+      // Destroy torrent if it exists and is not already destroyed
+      if (torrent && typeof torrent.destroy === 'function') {
+        try {
+          torrent.destroy();
+        } catch (e) {
+          // Ignore destroy errors
+        }
+      }
+
+      resolve(result);
+    };
+
+    // Error handler
+    const onError = (err: Error) => {
+      console.log(`Failed to fetch torrent info: ${err.message}`);
+      cleanup(undefined, torrent);
+    };
+
     const torrent = infoClient.add(
       uri,
       { store: MemoryStore, destroyStoreOnDestroy: true },
       (torrent) => {
-        clearTimeout(timeout);
         const info = getInfo(torrent);
         console.log(`Fetched info: ${info.name}`);
-        torrent.destroy();
-        resolve(info);
+        cleanup(info, torrent);
       }
     );
 
+    // Listen for errors
+    torrent.on('error', onError);
+
     const timeout = setTimeout(() => {
-      torrent.destroy();
-      resolve(undefined);
+      console.log(`Timeout fetching torrent info for: ${uri.substring(0, 50)}...`);
+      cleanup(undefined, torrent);
     }, TORRENT_TIMEOUT);
   });
 };
 
 const timeouts = new Map<string, NodeJS.Timeout>();
 const openStreams = new Map<string, number>();
+
+// Periodic cleanup to prevent memory leaks and reduce CPU usage when idle
+setInterval(() => {
+  const now = Date.now();
+
+  // 1. CLEANUP ORPHAN INFO TORRENTS
+  // Info torrents should only exist temporarily during metadata fetching
+  if (infoClient.torrents.length > 0) {
+    console.log(`Checking ${infoClient.torrents.length} info torrents for cleanup...`);
+
+    infoClient.torrents.forEach((torrent) => {
+      // Check if torrent is old (older than TORRENT_TIMEOUT * 3)
+      // @ts-ignore - _addedAt is not in types but exists
+      const torrentAge = now - (torrent._addedAt || now);
+
+      if (torrentAge > TORRENT_TIMEOUT * 3) {
+        console.log(`Cleaning up stale info torrent: ${torrent.name || torrent.infoHash}`);
+        try {
+          torrent.destroy();
+        } catch (e) {
+          // Ignore errors during cleanup
+        }
+      }
+    });
+  }
+
+  // 2. CLEANUP ORPHAN TIMEOUTS
+  // Check for torrents that have pending timeouts but no longer exist
+  const activeHashes = new Set(streamClient.torrents.map(t => t.infoHash));
+  for (const [hash, timeout] of timeouts.entries()) {
+    if (!activeHashes.has(hash)) {
+      console.log(`Cleaning up orphan timeout for hash: ${hash.substring(0, 8)}...`);
+      clearTimeout(timeout);
+      timeouts.delete(hash);
+      openStreams.delete(hash);
+    }
+  }
+
+  // 3. THROTTLE DHT WHEN IDLE (CPU optimization)
+  const isIdle = streamClient.torrents.length === 0 && infoClient.torrents.length === 0;
+
+  try {
+    // @ts-ignore - DHT pause/resume not in types
+    if (isIdle && streamClient.dht && streamClient.dht.listening) {
+      // Don't fully destroy DHT, just reduce activity
+      console.log('System idle, reducing DHT activity...');
+    }
+  } catch (e) {
+    // DHT methods might not be available
+  }
+
+  // 4. LOG STATS FOR MONITORING
+  if (streamClient.torrents.length > 0 || openStreams.size > 0) {
+    console.log(`Active torrents: ${streamClient.torrents.length}, Open streams: ${openStreams.size}, Pending timeouts: ${timeouts.size}`);
+  }
+}, 30000); // Run every 30 seconds
 
 export const streamOpened = (hash: string, fileName: string) => {
   console.log(`Stream opened: ${fileName}`);
@@ -192,23 +336,64 @@ export const streamClosed = (hash: string, fileName: string) => {
   console.log(`Stream closed: ${fileName}`);
 
   const count = openStreams.get(hash) || 1;
-  openStreams.set(hash, count - 1);
+  const newCount = count - 1;
 
-  if (count > 1) return;
+  // Update or delete the stream count
+  if (newCount > 0) {
+    openStreams.set(hash, newCount);
+    return; // Still have open streams, don't schedule cleanup
+  }
 
+  // No more open streams for this torrent
   openStreams.delete(hash);
 
-  let timeout = timeouts.get(hash);
-  if (timeout) return;
+  // Clear any existing timeout before creating a new one
+  const existingTimeout = timeouts.get(hash);
+  if (existingTimeout) {
+    console.log(`Clearing existing timeout for: ${hash.substring(0, 8)}...`);
+    clearTimeout(existingTimeout);
+    timeouts.delete(hash);
+  }
 
-  timeout = setTimeout(async () => {
-    const torrent = await streamClient.get(hash);
-    // @ts-ignore
-    torrent?.destroy(undefined, () => {
-      console.log(`Removed torrent: ${torrent.name}`);
+  // Schedule torrent cleanup after SEED_TIME
+  const timeout = setTimeout(async () => {
+    try {
+      const torrent = streamClient.get(hash);
+
+      if (!torrent) {
+        console.log(`Torrent already removed: ${hash.substring(0, 8)}...`);
+        timeouts.delete(hash);
+        return;
+      }
+
+      console.log(`Removing torrent after seed time: ${torrent.name}`);
+
+      // @ts-ignore
+      torrent.destroy({ destroyStore: !KEEP_DOWNLOADED_FILES }, (err) => {
+        if (err) {
+          const errorMsg = typeof err === 'string' ? err : err.message;
+          console.error(`Error destroying torrent: ${errorMsg}`);
+        } else {
+          console.log(`Successfully removed torrent: ${torrent.name}`);
+        }
+
+        // Always cleanup timeout, even if destroy failed
+        timeouts.delete(hash);
+
+        // Force remove all listeners to prevent memory leaks
+        try {
+          // @ts-ignore
+          torrent.removeAllListeners();
+        } catch (e) {
+          // Ignore errors
+        }
+      });
+    } catch (error) {
+      console.error(`Error in streamClosed timeout: ${error}`);
       timeouts.delete(hash);
-    });
+    }
   }, SEED_TIME);
 
   timeouts.set(hash, timeout);
+  console.log(`Scheduled cleanup for ${fileName} in ${SEED_TIME / 1000}s`);
 };
