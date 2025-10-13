@@ -50,3 +50,37 @@ On the configuration screen you can set up your torrent site & Jackett credentia
 ![image](https://github.com/nyakaspeter/stremio-torrent-stream/assets/43880678/d9a581a9-8036-44ab-942a-3750261cb50c)
 
 When you're done with the configuration hit the install button at the bottom, that will redirect you to Stremio where you can finally install the addon. If you've configured everything properly you'll see torrent results populating the stream list for movies and shows. Enjoy streaming!
+
+## Error Tracking with Sentry
+
+The addon supports error tracking with [Sentry](https://sentry.io/) to help monitor and debug issues in production.
+
+### Setting up Sentry
+
+1. Create a free account at [sentry.io](https://sentry.io/)
+2. Create a new Node.js project
+3. Copy your DSN (Data Source Name) from the project settings
+4. Set the `SENTRY_DSN` environment variable:
+
+**With Docker:**
+```bash
+docker run -p 58827:58827 -p 58828:58828 \
+  -e SENTRY_DSN="https://your-key@sentry.io/your-project-id" \
+  nyakaspeter/stremio-torrent-stream
+```
+
+**With Docker Compose:**
+Edit `compose.yaml` and uncomment the SENTRY_DSN line:
+```yaml
+environment:
+  - SENTRY_DSN=https://your-key@sentry.io/your-project-id
+```
+
+**With Node.js:**
+Create a `.env` file in the project root:
+```
+SENTRY_DSN=https://your-key@sentry.io/your-project-id
+```
+
+If `SENTRY_DSN` is not set, the addon will run normally without error tracking.
+

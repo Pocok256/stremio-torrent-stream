@@ -25,6 +25,8 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@sentry/node": "^10.19.0",
+    "@sentry/profiling-node": "^10.19.0",
     "axios": "^1.6.5",
     "axios-cookiejar-support": "^4.0.7",
     "cheerio": "1.0.0-rc.12",

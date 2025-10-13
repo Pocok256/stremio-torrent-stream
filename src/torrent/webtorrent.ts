@@ -5,6 +5,15 @@ import path from "path";
 import WebTorrent, { Torrent } from "webtorrent";
 import { getReadableDuration } from "../utils/file.js";
 
+// Try to import Sentry (optional, might fail on older Node versions)
+let Sentry: any = null;
+try {
+  const sentryModule = await import("@sentry/node");
+  Sentry = sentryModule;
+} catch (e) {
+  // Sentry not available, continue without it
+}
+
 interface FileInfo {
   name: string;
   path: string;
@@ -88,14 +97,30 @@ streamClient.on("torrent", (torrent) => {
 
 streamClient.on("error", (error) => {
   if (typeof error === "string") {
-    console.error(`Error: ${error}`);
+    console.error(`StreamClient Error: ${error}`);
+    Sentry?.captureMessage(`StreamClient Error: ${error}`, "error");
   } else {
     if (error.message.startsWith("Cannot add duplicate torrent")) return;
-    console.error(`Error: ${error.message}`);
+    console.error(`StreamClient Error: ${error.message}`);
+    Sentry?.captureException(error);
   }
 });
 
-infoClient.on("error", () => {});
+infoClient.on("error", (error) => {
+  // InfoClient errors are usually less critical (metadata fetching failures)
+  if (typeof error === "string") {
+    console.log(`InfoClient Error: ${error}`);
+  } else {
+    console.log(`InfoClient Error: ${error.message}`);
+  }
+  // Only capture non-timeout errors
+  if (error && typeof error !== "string" && !error.message?.includes("timed out")) {
+    Sentry?.captureException(error, {
+      level: "warning",
+      tags: { client: "infoClient" },
+    });
+  }
+});
 
 const launchTime = Date.now();
 
@@ -373,6 +398,11 @@ export const streamClosed = (hash: string, fileName: string) => {
         if (err) {
           const errorMsg = typeof err === 'string' ? err : err.message;
           console.error(`Error destroying torrent: ${errorMsg}`);
+          Sentry?.captureException(err, {
+            level: "warning",
+            tags: { operation: "torrent_destroy" },
+            extra: { hash: hash.substring(0, 8), torrentName: torrent.name },
+          });
         } else {
           console.log(`Successfully removed torrent: ${torrent.name}`);
         }
@@ -390,6 +420,11 @@ export const streamClosed = (hash: string, fileName: string) => {
       });
     } catch (error) {
       console.error(`Error in streamClosed timeout: ${error}`);
+      Sentry?.captureException(error, {
+        level: "error",
+        tags: { operation: "stream_closed_timeout" },
+        extra: { hash: hash.substring(0, 8) },
+      });
       timeouts.delete(hash);
     }
   }, SEED_TIME);

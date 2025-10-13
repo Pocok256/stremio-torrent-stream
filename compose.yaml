@@ -6,6 +6,10 @@ services:
       - 58827:58827
       - 58828:58828
     restart: unless-stopped
+    environment:
+      # Uncomment and set your Sentry DSN to enable error tracking
+      - SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+      - NODE_ENV=production
 
   jackett:
     image: lscr.io/linuxserver/jackett:latest
