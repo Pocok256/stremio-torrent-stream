@@ -7,6 +7,12 @@ FROM node:${NODE_VERSION} as build
 
 WORKDIR /usr/src/app
 
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g typescript@${TS_VERSION}
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g pnpm@${PNPM_VERSION}
@@ -14,7 +20,9 @@ RUN --mount=type=bind,source=package.json,target=package.json \
     --mount=type=bind,source=pnpm-lock.yaml,target=pnpm-lock.yaml \
     --mount=type=bind,source=patches,target=patches \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+    pnpm config set ignore-scripts "eztv-crawler,yts-api-node" && \
+    pnpm install --no-frozen-lockfile && \
+    pnpm rebuild node-datachannel
 
 COPY . .
 
@@ -33,9 +41,9 @@ ENV HTTPS_METHOD local-ip.medicmobile.org
 ENV DOWNLOAD_DIR /data
 ENV KEEP_DOWNLOADED_FILES false
 ENV MAX_CONNS_PER_TORRENT 50
-ENV DOWNLOAD_SPEED_LIMIT 20971520
-ENV UPLOAD_SPEED_LIMIT 1048576
-ENV SEED_TIME 60000
+ENV DOWNLOAD_SPEED_LIMIT 60971520
+ENV UPLOAD_SPEED_LIMIT 60971520
+ENV SEED_TIME 172800000
 ENV TORRENT_TIMEOUT 5000
 
 VOLUME /data

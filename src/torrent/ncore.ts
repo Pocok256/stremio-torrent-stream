@@ -2,6 +2,7 @@ import axios from "axios";
 import { wrapper } from "axios-cookiejar-support";
 import * as cheerio from "cheerio";
 import { CookieJar } from "tough-cookie";
+import { FormData } from "formdata-node";
 import { TorrentSearchResult } from "./search.js";
 import { isImdbId } from "../utils/imdb.js";
 
@@ -68,7 +69,9 @@ export const searchNcore = async (
 
         const rssUrl = $("link[rel=alternate]").attr("href");
         const downloadKey = rssUrl?.split("=")[1];
-        if (!downloadKey) return torrents;
+        if (!downloadKey) {
+          return torrents;
+        }
 
         for (const el of $("div.box_torrent")) {
           torrentsOnPage++;
@@ -100,8 +103,7 @@ export const searchNcore = async (
             torrent,
           });
         }
-
-        if (torrentsOnPage < 50) break;
+        if (torrentsOnPage < 25) break;
       } catch {
         continue;
       }
