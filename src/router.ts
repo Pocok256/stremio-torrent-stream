@@ -80,24 +80,29 @@ router.get("/stream/:torrentUri/:filePath", async (req, res) => {
 
   try {
     const noDataTimeout = setTimeout(() => {
+      console.log(`Stream timeout (no data): ${file.name}`);
       res.status(500).end();
     }, 10000);
 
     const noReadTimeout = setTimeout(() => {
+      console.log(`Stream timeout (no read): ${file.name}`);
       res.status(200).end();
     }, 60000);
 
     const videoStream = file.createReadStream({ start, end });
 
-    videoStream.on("data", () => {
+    videoStream.on("data", (chunk) => {
       clearTimeout(noDataTimeout);
+      console.log(`Stream data chunk: ${file.name}, size: ${chunk.length}`);
     });
 
     videoStream.on("readable", () => {
       noReadTimeout.refresh();
     });
 
-    videoStream.on("error", (error) => {});
+    videoStream.on("error", (error) => {
+      console.error(`Stream error: ${file.name}`, error);
+    });
 
     videoStream.pipe(res);
 

@@ -18,7 +18,7 @@ const initializeSentry = async () => {
   }
 
   try {
-    const { default: Sentry } = await import("@sentry/node");
+    const Sentry = await import("@sentry/node");
     const { nodeProfilingIntegration } = await import("@sentry/profiling-node");
 
     Sentry.init({
