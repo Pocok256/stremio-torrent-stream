@@ -9,6 +9,7 @@ import { searchJackett } from "./jackett.js";
 import { NcoreCategory, searchNcore } from "./ncore.js";
 import { searchYts } from "./yts.js";
 import { InsaneCategory, searchInsane } from "./insane.js";
+import { captureException } from "../utils/sentry.js";
 
 export type TorrentCategory = "movie" | "show";
 
@@ -55,7 +56,10 @@ export const searchTorrents = async (
   const searchAllCategories = !options?.categories?.length;
   const searchAllSources = !options?.sources?.length;
 
-  const promises: Promise<TorrentSearchResult[]>[] = [];
+  const searches: {
+    source: TorrentSource;
+    promise: Promise<TorrentSearchResult[]>;
+  }[] = [];
 
   if (options?.sources?.includes("jackett") || searchAllSources) {
     const categories = new Set<JackettCategory>();
@@ -68,14 +72,15 @@ export const searchTorrents = async (
       categories.add(JackettCategory.TV);
     }
 
-    promises.push(
-      searchJackett(
+    searches.push({
+      source: "jackett",
+      promise: searchJackett(
         query,
         Array.from(categories),
         options?.jackett?.url,
         options?.jackett?.apiKey
-      )
-    );
+      ),
+    });
   }
 
   if (options?.sources?.includes("ncore") || searchAllSources) {
@@ -95,14 +100,15 @@ export const searchTorrents = async (
       categories.add(NcoreCategory.Sorozat_SD_EN);
     }
 
-    promises.push(
-      searchNcore(
+    searches.push({
+      source: "ncore",
+      promise: searchNcore(
         query,
         Array.from(categories),
         options?.ncore?.user,
         options?.ncore?.password
-      )
-    );
+      ),
+    });
   }
 
   if (options?.sources?.includes("insane") || searchAllSources) {
@@ -126,14 +132,15 @@ export const searchTorrents = async (
       categories.add(InsaneCategory.Sorozat_Eng_UHD);
     }
 
-    promises.push(
-      searchInsane(
+    searches.push({
+      source: "insane",
+      promise: searchInsane(
         query,
         Array.from(categories),
         options?.insane?.user,
         options?.insane?.password
-      )
-    );
+      ),
+    });
   }
 
   if (options?.sources?.includes("itorrent") || searchAllSources) {
@@ -153,22 +160,50 @@ export const searchTorrents = async (
       ItorrentQuality.CAM,
     ];
 
-    promises.push(searchItorrent(query, Array.from(categories), qualities));
+    searches.push({
+      source: "itorrent",
+      promise: searchItorrent(query, Array.from(categories), qualities),
+    });
   }
 
   if (options?.sources?.includes("yts") || searchAllSources) {
     if (options?.categories?.includes("movie") || searchAllCategories) {
-      promises.push(searchYts(query));
+      searches.push({
+        source: "yts",
+        promise: searchYts(query),
+      });
     }
   }
 
   if (options?.sources?.includes("eztv") || searchAllSources) {
     if (options?.categories?.includes("show") || searchAllCategories) {
-      promises.push(searchEztv(query));
+      searches.push({
+        source: "eztv",
+        promise: searchEztv(query),
+      });
     }
   }
 
-  const results = (await Promise.all(promises)).flat();
+  const results = (await Promise.allSettled(
+    searches.map(({ promise }) => promise)
+  )).flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+
+    captureException(result.reason, {
+      tags: {
+        area: "torrent-search",
+        source: searches[index]?.source || "unknown",
+      },
+      extra: {
+        query,
+        options,
+      },
+    });
+
+    return [];
+  });
 
   console.log(`Search: got ${results.length} results for ${query}`);
 

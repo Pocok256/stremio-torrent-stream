@@ -5,6 +5,7 @@ import { CookieJar } from "tough-cookie";
 import { FormData } from "formdata-node";
 import { TorrentSearchResult } from "./search.js";
 import { isImdbId } from "../utils/imdb.js";
+import { captureException } from "../utils/sentry.js";
 
 const NCORE_USER = process.env.NCORE_USER;
 const NCORE_PASSWORD = process.env.NCORE_PASSWORD;
@@ -63,7 +64,7 @@ export const searchNcore = async (
           hogyan: "DESC",
         });
 
-        const link = `/torrents.php?${params.toString()}}`;
+        const link = `/torrents.php?${params.toString()}`;
         const torrentsPage = await client.get(link);
         const $ = cheerio.load(torrentsPage.data);
 
@@ -111,6 +112,16 @@ export const searchNcore = async (
 
     return torrents;
   } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "provider",
+        provider: "ncore",
+      },
+      extra: {
+        searchQuery,
+        categories,
+      },
+    });
     return [];
   }
 };

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { captureException } from "./sentry.js";
 
 export const getTitle = async (imdbId: string, language?: string) => {
   try {
@@ -16,7 +17,17 @@ export const getTitle = async (imdbId: string, language?: string) => {
     const title = data.match(/<title>(.*?)<\/title>/)[1] as string;
     if (!title) return undefined;
     return title.split(" (")[0];
-  } catch {
+  } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "imdb",
+        operation: "get-title",
+      },
+      extra: {
+        imdbId,
+        language,
+      },
+    });
     return undefined;
   }
 };

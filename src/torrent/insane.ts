@@ -3,6 +3,7 @@ import { wrapper } from "axios-cookiejar-support";
 import * as cheerio from "cheerio";
 import { CookieJar } from "tough-cookie";
 import { TorrentSearchResult } from "./search.js";
+import { captureException } from "../utils/sentry.js";
 
 const INSANE_USER = process.env.INSANE_USER;
 const INSANE_PASSWORD = process.env.INSANE_PASSWORD;
@@ -74,7 +75,7 @@ export const searchInsane = async (
           params.append("cat[]", category.toString());
         }
 
-        const link = `/browse.php?${params.toString()}}`;
+        const link = `/browse.php?${params.toString()}`;
         const torrentsPage = await client.get(link);
         const $ = cheerio.load(torrentsPage.data);
 
@@ -108,12 +109,23 @@ export const searchInsane = async (
 
         page++;
       } catch {
+        page++;
         continue;
       }
     }
 
     return torrents;
   } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "provider",
+        provider: "insane",
+      },
+      extra: {
+        searchQuery,
+        categories,
+      },
+    });
     return [];
   }
 };

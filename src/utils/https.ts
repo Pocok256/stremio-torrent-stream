@@ -12,13 +12,30 @@ enum HttpsMethod {
 
 const HTTPS_METHOD = process.env.HTTPS_METHOD || HttpsMethod.None;
 
+const listen = (server: https.Server, port: number) =>
+  new Promise<https.Server>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+
+    const onListening = () => {
+      server.off("error", onError);
+      resolve(server);
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port);
+  });
+
 export const serveHTTPS = async (app: RequestListener, port: number) => {
   if (HTTPS_METHOD === HttpsMethod.LocalIpMedic) {
     const json = (await axios.get("https://local-ip.medicmobile.org/keys"))
       .data;
     const cert = `${json.cert}\n${json.chain}`;
     const httpsServer = https.createServer({ key: json.privkey, cert }, app);
-    httpsServer.listen(port);
+    await listen(httpsServer, port);
     console.log(`HTTPS addon listening on port ${port}`);
     return httpsServer;
   }
@@ -31,7 +48,7 @@ export const serveHTTPS = async (app: RequestListener, port: number) => {
       .data;
     const cert = `${serverPem}\n${chainPem}`;
     const httpsServer = https.createServer({ key, cert }, app);
-    httpsServer.listen(port);
+    await listen(httpsServer, port);
     console.log(`HTTPS addon listening on port ${port}`);
     return httpsServer;
   }

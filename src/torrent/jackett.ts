@@ -1,6 +1,7 @@
 import { JackettApi } from "ts-jackett-api";
 import { JackettCategory } from "ts-jackett-api/lib/types/JackettCategory.js";
 import { TorrentSearchResult } from "./search.js";
+import { captureException } from "../utils/sentry.js";
 
 const JACKETT_URL = process.env.JACKETT_URL;
 const JACKETT_KEY = process.env.JACKETT_KEY;
@@ -35,6 +36,17 @@ export const searchJackett = async (
       magnet: result.MagnetUri || undefined,
     }));
   } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "provider",
+        provider: "jackett",
+      },
+      extra: {
+        searchQuery,
+        categories,
+        url: jackettUrl || JACKETT_URL,
+      },
+    });
     return [];
   }
 };

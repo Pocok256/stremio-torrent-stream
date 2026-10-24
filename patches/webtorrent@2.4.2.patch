@@ -1,0 +1,12 @@
+diff --git a/lib/rarity-map.js b/lib/rarity-map.js
+--- a/lib/rarity-map.js
++++ b/lib/rarity-map.js
+@@ -13,6 +13,8 @@ export default class RarityMap {
+       this._initWire(wire)
+     }
+     this._onWireHave = index => {
++      // Peer-provided indices must not grow the array used by recalculate().
++      if (!Number.isInteger(index) || index < 0 || index >= this._numPieces) return
+       this._pieces[index] += 1
+     }
+     this._onWireBitfield = () => {

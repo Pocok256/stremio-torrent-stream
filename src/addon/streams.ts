@@ -11,6 +11,7 @@ import { getReadableSize, isSubtitleFile, isVideoFile } from "../utils/file.js";
 import { getTitles } from "../utils/imdb.js";
 import { guessLanguage } from "../utils/language.js";
 import { guessQuality } from "../utils/quality.js";
+import { captureException } from "../utils/sentry.js";
 import { isFileNameMatch, isTorrentNameMatch } from "../utils/shows.js";
 
 interface HandlerArgs {
@@ -39,7 +40,12 @@ interface HandlerArgs {
   req: Request;
 }
 
-export const streamHandler = async ({ type, id, config, req }: HandlerArgs) => {
+export const streamHandler = async ({
+  type,
+  id,
+  config = {} as NonNullable<HandlerArgs["config"]>,
+  req,
+}: HandlerArgs) => {
   let torrents: TorrentSearchResult[] = [];
 
   const categories: TorrentCategory[] = [];
@@ -60,7 +66,7 @@ export const streamHandler = async ({ type, id, config, req }: HandlerArgs) => {
   if (config.searchByTitle === "on") queries.push(...(await getTitles(imdbId)));
 
   torrents = (
-    await Promise.all(
+    await Promise.allSettled(
       queries.map((query) =>
         searchTorrents(query, {
           categories,
@@ -80,7 +86,25 @@ export const streamHandler = async ({ type, id, config, req }: HandlerArgs) => {
         })
       )
     )
-  ).flat();
+  ).flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+
+    captureException(result.reason, {
+      tags: {
+        area: "addon",
+        operation: "search",
+      },
+      extra: {
+        imdbId,
+        query: queries[index],
+        type,
+      },
+    });
+
+    return [];
+  });
 
   torrents = dedupeTorrents(torrents);
 
@@ -102,12 +126,31 @@ export const streamHandler = async ({ type, id, config, req }: HandlerArgs) => {
   });
 
   let streams = (
-    await Promise.all(
+    await Promise.allSettled(
       torrents.map((torrent) =>
         getStreamsFromTorrent(req, torrent, season, episode)
       )
     )
-  ).flat();
+  ).flatMap((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+
+    captureException(result.reason, {
+      tags: {
+        area: "addon",
+        operation: "stream-build",
+      },
+      extra: {
+        imdbId,
+        torrent: torrents[index]?.name,
+        season,
+        episode,
+      },
+    });
+
+    return [];
+  });
 
   streams = streams.filter((stream) => {
     if (!isAllowedFormat(config, stream.fileName)) return false;

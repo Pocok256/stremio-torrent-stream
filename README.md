@@ -15,8 +15,21 @@ With Docker Compose (the addon and Jackett simultaneously):
 ```
 git clone https://github.com/nyakaspeter/stremio-torrent-stream.git
 cd stremio-torrent-stream
+cp .env.example .env
+# Add your Sentry DSN to .env, then run:
 docker compose up
 ```
+
+If you want Sentry monitoring, set `SENTRY_DSN` in `.env`. You can also tune tracing and privacy-related options through these variables:
+
+- `SENTRY_DSN`: the Sentry project DSN used by the Node SDK
+- `SENTRY_ENVIRONMENT`: environment label shown in Sentry, defaults to `production`
+- `SENTRY_TRACES_SAMPLE_RATE`: tracing sample rate between `0` and `1`, defaults to `0.1`
+- `SENTRY_PROFILE_SESSION_SAMPLE_RATE`: profiling session sample rate between `0` and `1`, defaults to `0`
+- `SENTRY_ENABLE_LOGS`: enables Sentry log shipping when set to `true`
+- `SENTRY_SEND_DEFAULT_PII`: sends request headers and IP metadata when set to `true`
+
+If `SENTRY_DSN` is omitted, Sentry stays disabled.
 
 With Node.js and [pnpm](https://pnpm.io/installation):
 ```

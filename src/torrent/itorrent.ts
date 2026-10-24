@@ -1,6 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { TorrentSearchResult } from "./search.js";
+import { captureException } from "../utils/sentry.js";
 
 export enum ItorrentCategory {
   Film = 3,
@@ -18,86 +19,104 @@ export const searchItorrent = async (
   categories: ItorrentCategory[],
   qualities: ItorrentQuality[]
 ): Promise<TorrentSearchResult[]> => {
-  const torrents: TorrentSearchResult[] = [];
-  const quality = qualities.join(",");
+  try {
+    const torrents: TorrentSearchResult[] = [];
+    const quality = qualities.join(",");
+    const encodedQuery = encodeURIComponent(searchQuery);
 
-  await Promise.all(
-    categories.map(async (category) => {
-      let page = 0;
+    await Promise.all(
+      categories.map(async (category) => {
+        let page = 0;
 
-      while (page <= 5) {
-        try {
-          page++;
+        while (page <= 5) {
+          try {
+            page++;
 
-          let torrentsOnPage = 0;
+            let torrentsOnPage = 0;
 
-          const link = `https://itorrent.ws/torrentek/category/${category}/title/${searchQuery}/qualities[]/${quality}/page/${page}/`;
-          const torrentsPage = await axios.get(link);
-          const $ = cheerio.load(torrentsPage.data);
+            const link = `https://itorrent.ws/torrentek/category/${category}/title/${encodedQuery}/qualities[]/${quality}/page/${page}/`;
+            const torrentsPage = await axios.get(link);
+            const $ = cheerio.load(torrentsPage.data);
 
-          await Promise.all(
-            [...$("tr.gradeX")].map(async (el) => {
-              torrentsOnPage++;
+            await Promise.all(
+              [...$("tr.gradeX")].map(async (el) => {
+                torrentsOnPage++;
 
-              const tracker = "iTorrent";
-              const torrentAnchor = $(el).find("td.ellipse > a");
-              const torrentHref = torrentAnchor.attr("href");
-              const name = torrentAnchor.text().trim();
+                const tracker = "iTorrent";
+                const torrentAnchor = $(el).find("td.ellipse > a");
+                const torrentHref = torrentAnchor.attr("href");
+                const name = torrentAnchor.text().trim();
 
-              if (!torrentHref || !name) return;
+                if (!torrentHref || !name) return;
 
-              const category = parseCategory($(el).find("i.zqf").attr("title"));
-              const size = parseSize(
-                $(el).find("td:nth-child(5)").text().trim()
-              );
-              const seeds = Number($(el).find("td:nth-child(7)").text());
-              const peers = Number($(el).find("td:nth-child(8)").text());
-
-              const torrentPageLink = `https://itorrent.ws${torrentHref}`;
-
-              let torrent: string | undefined;
-              let magnet: string | undefined;
-
-              try {
-                const torrentPage = await axios.get(torrentPageLink);
-                const $ = cheerio.load(torrentPage.data);
-
-                const torrentFileHref = $("a.btn-primary.seed-warning").attr(
-                  "href"
+                const category = parseCategory(
+                  $(el).find("i.zqf").attr("title")
                 );
+                const size = parseSize(
+                  $(el).find("td:nth-child(5)").text().trim()
+                );
+                const seeds = Number($(el).find("td:nth-child(7)").text());
+                const peers = Number($(el).find("td:nth-child(8)").text());
 
-                if (torrentFileHref)
-                  torrent = `https://itorrent.ws${torrentFileHref}`;
+                const torrentPageLink = `https://itorrent.ws${torrentHref}`;
 
-                magnet = $("a.btn-success.seed-warning").attr("href");
+                let torrent: string | undefined;
+                let magnet: string | undefined;
 
-                if (!torrent && !magnet) return;
-              } catch {
-                return;
-              }
+                try {
+                  const torrentPage = await axios.get(torrentPageLink);
+                  const $ = cheerio.load(torrentPage.data);
 
-              torrents.push({
-                name,
-                tracker,
-                category,
-                size,
-                seeds,
-                peers,
-                torrent,
-                magnet,
-              });
-            })
-          );
+                  const torrentFileHref = $("a.btn-primary.seed-warning").attr(
+                    "href"
+                  );
 
-          if (torrentsOnPage < 48) break;
-        } catch {
-          continue;
+                  if (torrentFileHref)
+                    torrent = `https://itorrent.ws${torrentFileHref}`;
+
+                  magnet = $("a.btn-success.seed-warning").attr("href");
+
+                  if (!torrent && !magnet) return;
+                } catch {
+                  return;
+                }
+
+                torrents.push({
+                  name,
+                  tracker,
+                  category,
+                  size,
+                  seeds,
+                  peers,
+                  torrent,
+                  magnet,
+                });
+              })
+            );
+
+            if (torrentsOnPage < 48) break;
+          } catch {
+            continue;
+          }
         }
-      }
-    })
-  );
+      })
+    );
 
-  return torrents;
+    return torrents;
+  } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "provider",
+        provider: "itorrent",
+      },
+      extra: {
+        searchQuery,
+        categories,
+        qualities,
+      },
+    });
+    return [];
+  }
 };
 
 const parseCategory = (category: string | undefined) => {

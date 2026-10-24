@@ -5,6 +5,13 @@ services:
     ports:
       - 58827:58827
       - 58828:58828
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      SENTRY_PROFILE_SESSION_SAMPLE_RATE: ${SENTRY_PROFILE_SESSION_SAMPLE_RATE:-0}
+      SENTRY_ENABLE_LOGS: ${SENTRY_ENABLE_LOGS:-false}
+      SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-false}
     restart: unless-stopped
 
   jackett:

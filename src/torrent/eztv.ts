@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import { getTorrentsByImdbId } from "eztv-crawler";
 import { TorrentSearchResult } from "./search.js";
 import { isImdbId } from "../utils/imdb.js";
+import { captureException } from "../utils/sentry.js";
 
 export const searchEztv = async (
   searchQuery: string
@@ -61,6 +62,15 @@ export const searchEztv = async (
       });
     }
   } catch (error) {
+    captureException(error, {
+      tags: {
+        area: "provider",
+        provider: "eztv",
+      },
+      extra: {
+        searchQuery,
+      },
+    });
     return [];
   }
 };

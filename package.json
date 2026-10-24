@@ -4,8 +4,12 @@
   "description": "",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "build": "tsc",
+    "test:webtorrent-patch": "node --test test/webtorrent-rarity-map.test.mjs",
     "start": "node --no-warnings dist/index.js",
     "dev": "esrun --node-no-warnings --watch src/index.ts"
   },
@@ -25,6 +29,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@sentry/node": "^10.51.0",
     "axios": "^1.6.5",
     "axios-cookiejar-support": "^4.0.7",
     "cheerio": "1.0.0-rc.12",
@@ -39,12 +44,18 @@
     "stremio-addon-sdk": "^1.6.10",
     "tough-cookie": "^4.1.3",
     "ts-jackett-api": "^1.0.0",
-    "webtorrent": "^2.4.2",
+    "webtorrent": "2.4.2",
     "yts-api-node": "^1.1.3"
   },
   "pnpm": {
+    "overrides": {
+      "webrtc-polyfill": "1.2.2",
+      "node-datachannel": "0.33.4"
+    },
     "patchedDependencies": {
-      "stremio-addon-sdk@1.6.10": "patches/stremio-addon-sdk@1.6.10.patch"
+      "bittorrent-protocol@4.1.12": "patches/bittorrent-protocol@4.1.12.patch",
+      "stremio-addon-sdk@1.6.10": "patches/stremio-addon-sdk@1.6.10.patch",
+      "webtorrent@2.4.2": "patches/webtorrent@2.4.2.patch"
     },
     "onlyBuiltDependencies": [
       "bufferutil",
