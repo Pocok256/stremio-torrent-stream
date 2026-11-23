@@ -76,12 +76,24 @@ const TORRENT_TIMEOUT = Number(process.env.TORRENT_TIMEOUT) || 5 * 1000;
 // Periodically report torrents that have completed downloading and are seeding.
 const SEED_REPORT_INTERVAL = 30 * 60 * 1000;
 
-const infoClient = new WebTorrent();
+// Use uTP peer connections in addition to TCP (default true). utp-native opens a
+// separate UDP socket for every outgoing uTP connection, so disable it if the
+// number of UDP sockets keeps growing with many long-seeding torrents.
+const ENABLE_UTP = process.env.ENABLE_UTP !== "false";
+
+// Minimum time (ms) between file progress checks; file.progress iterates every piece.
+const PROGRESS_CHECK_INTERVAL = 1000;
+
+const infoClient = new WebTorrent({
+  // @ts-ignore
+  utp: ENABLE_UTP,
+});
 const streamClient = new WebTorrent({
   // @ts-ignore
   downloadLimit: DOWNLOAD_SPEED_LIMIT,
   uploadLimit: UPLOAD_SPEED_LIMIT,
   maxConns: MAX_CONNS_PER_TORRENT,
+  utp: ENABLE_UTP,
 });
 
 const seedStartedAt = new Map<
@@ -515,7 +527,14 @@ const trackFileProgress = (torrent: Torrent, file: Torrent["files"][number]) => 
     onDone: () => {},
   };
 
+  let lastProgressCheck = 0;
+
+  // "download" fires for every received block, so only sample progress periodically.
   tracker.onDownload = () => {
+    const now = Date.now();
+    if (now - lastProgressCheck < PROGRESS_CHECK_INTERVAL) return;
+    lastProgressCheck = now;
+
     const progress = Math.floor(file.progress * 100);
     while (progress >= tracker.nextThreshold && tracker.nextThreshold < 100) {
       const remainingBytes = Math.max(0, file.length - file.downloaded);

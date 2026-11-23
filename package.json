@@ -50,12 +50,13 @@
   "pnpm": {
     "overrides": {
       "webrtc-polyfill": "1.2.2",
-      "node-datachannel": "0.33.4"
+      "node-datachannel": "0.33.4",
+      "bittorrent-protocol": "4.1.21"
     },
     "patchedDependencies": {
-      "bittorrent-protocol@4.1.12": "patches/bittorrent-protocol@4.1.12.patch",
       "stremio-addon-sdk@1.6.10": "patches/stremio-addon-sdk@1.6.10.patch",
-      "webtorrent@2.4.2": "patches/webtorrent@2.4.2.patch"
+      "webtorrent@2.4.2": "patches/webtorrent@2.4.2.patch",
+      "bittorrent-protocol@4.1.21": "patches/bittorrent-protocol@4.1.21.patch"
     },
     "onlyBuiltDependencies": [
       "bufferutil",
